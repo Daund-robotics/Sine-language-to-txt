@@ -14,6 +14,7 @@ collecting = False
 current_label = ""
 hsv_lower = np.array([0, 20, 70])
 hsv_upper = np.array([20, 255, 255])
+background = None
 
 class GestureApp:
     def __init__(self, window, window_title):
@@ -26,6 +27,8 @@ class GestureApp:
 
         self.window.bind('<q>', lambda event: self.on_closing())
         self.window.bind('<Q>', lambda event: self.on_closing())
+        self.window.bind('<r>', lambda event: self.reset_background())
+        self.window.bind('<R>', lambda event: self.reset_background())
         
         # Video source
         self.video_source = 0
@@ -64,6 +67,9 @@ class GestureApp:
         self.lbl_entry.pack()
         self.entry_label = tk.Entry(self.controls_panel)
         self.entry_label.pack(pady=5)
+
+        self.btn_reset = tk.Button(self.controls_panel, text="Reset Background (R)", width=20, command=self.reset_background, bg="#ffffcc")
+        self.btn_reset.pack(pady=5)
 
         self.btn_start = tk.Button(self.controls_panel, text="Start Capture", width=20, command=self.start_capture, bg="#dddddd")
         self.btn_start.pack(pady=5)
@@ -150,6 +156,13 @@ class GestureApp:
         # Retrain check model with new data
         self.train_check_model()
 
+    def reset_background(self):
+        global background
+        background = None
+        self.info_label.config(text="Background Reset!", fg="blue")
+        # Give user time to see message
+        self.window.after(1000, lambda: self.info_label.config(text="Prepare...", fg="black"))
+
     def save_data(self):
         self.save_hsv()
         global data, labels
@@ -165,6 +178,7 @@ class GestureApp:
             messagebox.showerror("Error", f"Failed to save: {e}")
 
     def update(self):
+        global background
         ret, frame = self.vid.read()
         if ret:
             frame = cv2.flip(frame, 1)
@@ -174,13 +188,30 @@ class GestureApp:
             x2, y2 = 600, 400
             
             roi = frame[y1:y2, x1:x2]
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
             
+            # --- Background Subtraction Logic ---
+            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            gray_roi = cv2.GaussianBlur(gray_roi, (7, 7), 0)
+
+            if background is None:
+                background = gray_roi.copy().astype("float")
+            
+            cv2.accumulateWeighted(gray_roi, background, 0.5)
+            delta = cv2.absdiff(gray_roi, cv2.convertScaleAbs(background))
+            thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+            # ------------------------------------
+
+            # --- HSV Logic ---
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
             lower = np.array([self.sliders["H Min"].get(), self.sliders["S Min"].get(), self.sliders["V Min"].get()])
             upper = np.array([self.sliders["H Max"].get(), self.sliders["S Max"].get(), self.sliders["V Max"].get()])
             
-            mask = cv2.inRange(hsv, lower, upper)
-            mask = cv2.erode(mask, None, iterations=2)
+            mask_hsv = cv2.inRange(hsv, lower, upper)
+            
+            # Combine Masks
+            combined_mask = cv2.bitwise_and(mask_hsv, thresh)
+            
+            mask = cv2.erode(combined_mask, None, iterations=2)
             mask = cv2.dilate(mask, None, iterations=2)
             blur = cv2.medianBlur(mask, 5)
             
@@ -224,7 +255,7 @@ class GestureApp:
             mask_bgr = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
             mask_small = cv2.resize(mask_bgr, (150, 150))
             frame[0:150, 0:150] = mask_small
-            cv2.putText(frame, "Binary Mask", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv2.putText(frame, "Combined Mask", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
             if collecting and found_hand:
                 data.append(feature_vector)

@@ -30,6 +30,7 @@ except:
     upper = np.array([20, 255, 255])
 
 cap = cv2.VideoCapture(0)
+background = None
 
 while True:
     ret, frame = cap.read()
@@ -44,10 +45,26 @@ while True:
     
     roi = frame[y1:y2, x1:x2]
     
+    # --- Background Subtraction ---
+    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    gray_roi = cv2.GaussianBlur(gray_roi, (7, 7), 0)
+
+    if background is None:
+        background = gray_roi.copy().astype("float")
+    
+    cv2.accumulateWeighted(gray_roi, background, 0.5)
+    delta = cv2.absdiff(gray_roi, cv2.convertScaleAbs(background))
+    thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+    # ------------------------------
+
     # Process
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, lower, upper)
-    mask = cv2.erode(mask, None, iterations=2)
+    mask_hsv = cv2.inRange(hsv, lower, upper)
+    
+    # Combine Masks
+    combined_mask = cv2.bitwise_and(mask_hsv, thresh)
+    
+    mask = cv2.erode(combined_mask, None, iterations=2)
     mask = cv2.dilate(mask, None, iterations=2)
     blur = cv2.medianBlur(mask, 5)
     
@@ -55,6 +72,7 @@ while True:
     resized = cv2.resize(blur, (50, 50))
     feature_vector = resized.flatten()
     
+    label_text = ""
     # Features check
     if len(feature_vector) == data.shape[1]:
         prediction = model.predict([feature_vector])
@@ -78,7 +96,8 @@ while True:
     
     # Show text at bottom
     cv2.rectangle(frame, (0, H-80), (W, H), (0,0,0), -1)
-    cv2.putText(frame, label_text, (20, H-20), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.putText(frame, f"Prediction: {label_text}", (20, H-20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(frame, "Press 'r' to reset background", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     
     # Show mask
     mask_bgr = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
@@ -87,11 +106,12 @@ while True:
 
     cv2.imshow('Gesture Recognition', frame)
     key = cv2.waitKey(1) & 0xFF
-    key = cv2.waitKey(1) & 0xFF
     if key == ord('q') or key == ord('Q'):
         break
+    elif key == ord('r') or key == ord('R'):
+        background = None
+        print("Background Reset")
 
 cap.release()
 cv2.destroyAllWindows()
-import sys
-sys.exit(0)
+
