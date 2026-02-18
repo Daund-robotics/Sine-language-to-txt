@@ -1,4 +1,5 @@
 import cv2
+import os
 import pickle
 import numpy as np
 import sklearn
@@ -29,7 +30,11 @@ except:
     lower = np.array([0, 20, 70])
     upper = np.array([20, 255, 255])
 
-cap = cv2.VideoCapture(0)
+# specific backend for windows
+if os.name == 'nt':
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+else:
+    cap = cv2.VideoCapture(0)
 background = None
 
 while True:
